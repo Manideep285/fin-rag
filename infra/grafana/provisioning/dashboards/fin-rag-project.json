@@ -1,0 +1,168 @@
+{
+  "uid": "fin-rag-project",
+  "title": "fin-rag — project dashboard",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": { "from": "now-24h", "to": "now" },
+  "tags": ["fin-rag"],
+  "templating": {
+    "list": [
+      {
+        "name": "project_id",
+        "label": "Project",
+        "type": "query",
+        "datasource": { "type": "postgres", "uid": "pg" },
+        "query": "SELECT name AS __text, id::text AS __value FROM projects ORDER BY name",
+        "refresh": 1,
+        "includeAll": false,
+        "multi": false,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Queries (window)",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT count(*) FROM query_logs WHERE project_id = '$project_id'::uuid AND created_at > $__timeFrom() AND created_at < $__timeTo()",
+          "format": "table"
+        }
+      ],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" } }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Refusal rate",
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT COALESCE(avg(CASE WHEN refused THEN 1.0 ELSE 0.0 END), 0) AS rate FROM query_logs WHERE project_id = '$project_id'::uuid AND created_at > $__timeFrom() AND created_at < $__timeTo()",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 } },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "" } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Latency p50 / p95 (ms)",
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT percentile_disc(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50, percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95 FROM query_logs WHERE project_id = '$project_id'::uuid AND created_at > $__timeFrom() AND created_at < $__timeTo()",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Avg groundedness",
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT avg(groundedness) FROM eval_results WHERE project_id = '$project_id'::uuid AND created_at > $__timeFrom() AND created_at < $__timeTo()",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": { "defaults": { "decimals": 2, "min": 0, "max": 1 } }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Queries per minute",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, count(*)::int AS queries FROM query_logs WHERE project_id = '$project_id'::uuid AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 over time",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT date_trunc('minute', created_at) AS time, percentile_disc(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50_ms, percentile_disc(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_ms FROM query_logs WHERE project_id = '$project_id'::uuid AND $__timeFilter(created_at) GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms" } }
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Recent refusals",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "pg" },
+      "targets": [
+        {
+          "rawSql": "SELECT rl.created_at, rl.reason, ql.query FROM refusal_logs rl JOIN query_logs ql ON ql.id = rl.query_log_id WHERE rl.project_id = '$project_id'::uuid AND $__timeFilter(rl.created_at) ORDER BY rl.created_at DESC LIMIT 50",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Worker job duration p95 (s)",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (queue, le) (rate(worker_job_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{queue}}"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "API request latency (p95) — Prometheus",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(query_latency_seconds_bucket[5m])))",
+          "legendFormat": "p95"
+        },
+        {
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(query_latency_seconds_bucket[5m])))",
+          "legendFormat": "p50"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Refusals by reason (per 5m)",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prom" },
+      "targets": [
+        {
+          "expr": "sum by (reason) (rate(refusals_total[5m]))",
+          "legendFormat": "{{reason}}"
+        }
+      ]
+    }
+  ]
+}

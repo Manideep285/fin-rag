@@ -1,0 +1,240 @@
+###############################################################################
+# On-Prem RAG Platform — Pilot
+# 7 services: app, api, db, store, worker, llm, obs
+###############################################################################
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  ###########################################################################
+  # 1. app — Next.js stakeholder chat UI + admin console
+  ###########################################################################
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_GRAFANA_BASE_URL: ${NEXT_PUBLIC_GRAFANA_BASE_URL:-http://localhost:3001}
+    image: finrag/app:${IMAGE_TAG:-latest}
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_BASE_URL=${NEXT_PUBLIC_API_BASE_URL:-http://api:8000}
+      - NEXT_PUBLIC_GRAFANA_BASE_URL=${NEXT_PUBLIC_GRAFANA_BASE_URL:-http://localhost:3001}
+      - API_INTERNAL_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 2. api — FastAPI: auth, ingest, query, admin
+  ###########################################################################
+  api:
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+    image: finrag/api:${IMAGE_TAG:-latest}
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - MINIO_ENDPOINT=store:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_BUCKET=${MINIO_BUCKET:-rawfiles}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_TTL_HOURS=${JWT_TTL_HOURS:-24}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://llm:8001/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-EMPTY}
+      - LLM_MODEL=${LLM_MODEL:-mistral-7b-instruct}
+      - EMBED_MODEL=${EMBED_MODEL:-BAAI/bge-base-en-v1.5}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      store:
+        condition: service_healthy
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 3. db — PostgreSQL + pgvector + pg_cron + PGMQ
+  ###########################################################################
+  db:
+    image: ghcr.io/tembo-io/tembo-pg-cnpg:15.3.0
+    # ^ image bundles pgvector, pg_cron, pgmq.  Substitute with `pgvector/pgvector`
+    #   + manual extension install if you need a pinned upstream image.
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_cron,pgmq
+      - -c
+      - cron.database_name=${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - pgbackups:/backups/pg
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 4. store — MinIO object store
+  ###########################################################################
+  store:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}
+    volumes:
+      - miniodata:/data
+      - miniobackups:/backups/minio
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 5. worker — ingestion + chunking + embedding + async eval
+  ###########################################################################
+  worker:
+    build:
+      context: ../worker
+      dockerfile: Dockerfile
+    image: finrag/worker:${IMAGE_TAG:-latest}
+    environment:
+      - DATABASE_URL=postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      - MINIO_ENDPOINT=store:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD}
+      - MINIO_BUCKET=${MINIO_BUCKET:-rawfiles}
+      - EMBED_MODEL=${EMBED_MODEL:-BAAI/bge-base-en-v1.5}
+      - RERANKER_MODEL=${RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://llm:8001/v1}
+      - LLM_API_KEY=${LLM_API_KEY:-EMPTY}
+      - LLM_MODEL=${LLM_MODEL:-mistral-7b-instruct}
+      - WORKER_POLL_INTERVAL=${WORKER_POLL_INTERVAL:-5}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      store:
+        condition: service_healthy
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 6. llm — vLLM (only when GPU available) OR a thin OpenAI-compatible proxy
+  #
+  # Toggle by setting LLM_PROVIDER:
+  #   - local : starts the vllm-gpu profile
+  #   - openai: skips this service; api/worker hit LLM_BASE_URL directly
+  ###########################################################################
+  llm:
+    profiles: ["local"]
+    image: vllm/vllm-openai:latest
+    command:
+      - --model
+      - ${VLLM_MODEL:-mistralai/Mistral-7B-Instruct-v0.2}
+      - --port
+      - "8001"
+      - --served-model-name
+      - ${LLM_MODEL:-mistral-7b-instruct}
+      - --max-model-len
+      - "4096"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - hfcache:/root/.cache/huggingface
+    ports:
+      - "${LLM_PORT:-8001}:8001"
+    restart: unless-stopped
+    logging: *default-logging
+
+  ###########################################################################
+  # 7. obs — Prometheus + Grafana in one service (pilot simplification)
+  ###########################################################################
+  obs:
+    image: grafana/grafana:11.3.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # Allow the Next.js admin console to embed dashboards via <iframe>.
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_SECURITY_COOKIE_SAMESITE=disabled
+      # Anonymous viewer access keeps the pilot iframe simple. Switch to
+      # auth.proxy + a header-injecting reverse proxy for production.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+      - GF_USERS_DEFAULT_THEME=light
+    env_file:
+      - .env
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - grafanadata:/var/lib/grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    restart: unless-stopped
+    logging: *default-logging
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    logging: *default-logging
+
+volumes:
+  pgdata:
+  pgbackups:
+  miniodata:
+  miniobackups:
+  hfcache:
+  grafanadata:
+  promdata:
