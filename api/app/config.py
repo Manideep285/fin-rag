@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # --- core ---
     database_url: str = "postgresql+psycopg://finrag:finrag@db:5432/finrag"
     log_level: str = "INFO"
+    cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
 
     # --- minio ---
     minio_endpoint: str = "store:9000"

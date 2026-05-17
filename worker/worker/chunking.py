@@ -35,13 +35,14 @@ def _enc():
 @lru_cache
 def _nlp():
     import spacy
-    return spacy.load("en_core_web_sm", disable=["tagger", "parser", "ner", "lemmatizer"])
+    nlp = spacy.load("en_core_web_sm", disable=["tagger", "parser", "ner", "lemmatizer"])
+    if "sentencizer" not in nlp.pipe_names:
+        nlp.add_pipe("sentencizer")
+    return nlp
 
 
 def _sentences(text: str) -> list[str]:
-    nlp = _nlp()
-    nlp.add_pipe("sentencizer") if "sentencizer" not in nlp.pipe_names else None
-    return [s.text.strip() for s in nlp(text).sents if s.text.strip()]
+    return [s.text.strip() for s in _nlp()(text).sents if s.text.strip()]
 
 
 def _tok_len(s: str) -> int:

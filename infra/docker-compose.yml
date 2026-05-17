@@ -56,6 +56,8 @@ services:
       - LLM_MODEL=${LLM_MODEL:-mistral-7b-instruct}
       - EMBED_MODEL=${EMBED_MODEL:-BAAI/bge-base-en-v1.5}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["http://localhost:3000"]}
+      - WORKER_URL=http://worker:9100
     depends_on:
       db:
         condition: service_healthy
