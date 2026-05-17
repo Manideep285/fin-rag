@@ -31,7 +31,7 @@ export default function EvalPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Evaluation results</h1>
       <p className="text-sm text-zinc-500">
-        Async groundedness scoring. Sampled at {`{eval_sample_rate}`} of queries (configurable).
+        Async groundedness scoring. Sampled at 10% of queries (configurable via EVAL_SAMPLE_RATE).
       </p>
 
       <div className="grid grid-cols-3 gap-3">

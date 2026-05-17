@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { decodeJwt, getToken } from "@/lib/api";
+import { decodeJwt, getToken, setToken } from "@/lib/api";
 
 export type Principal = {
   user_id: string;
@@ -20,6 +20,13 @@ export function useAuth(): { ready: boolean; principal: Principal | null } {
     }
     const payload = decodeJwt(t);
     if (!payload) {
+      setReady(true);
+      return;
+    }
+    // Check JWT expiration — auto-clear expired tokens
+    const exp = payload.exp as number | undefined;
+    if (exp && exp * 1000 < Date.now()) {
+      setToken(null);
       setReady(true);
       return;
     }

@@ -36,4 +36,7 @@ def route(extension: str):
     if ext in (".txt", ".md"):
         from . import text as text_mod
         return text_mod.extract
+    if ext == ".csv":
+        from . import csv_ext
+        return csv_ext.extract
     raise ValueError(f"unsupported extension {ext}")

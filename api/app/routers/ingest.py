@@ -15,8 +15,7 @@ from ..storage import ensure_bucket, put_object, storage_key
 
 router = APIRouter(prefix="/api/ingest", tags=["ingest"])
 
-ALLOWED_EXT = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md"}
-MAX_UPLOAD_MB = 200
+ALLOWED_EXT = {".pdf", ".docx", ".xlsx", ".pptx", ".txt", ".md", ".csv"}
 
 
 def _should_auto_approve(db: Session, project_id, ext: str, size_mb: float, source_type: str) -> bool:
@@ -51,8 +50,6 @@ async def upload(
 
     data = await file.read()
     size_mb = len(data) / 1024 / 1024
-    if size_mb > MAX_UPLOAD_MB:
-        raise HTTPException(413, f"file exceeds {MAX_UPLOAD_MB} MB")
 
     source_id = uuid4()
     auto = _should_auto_approve(db, p.project_id, ext, size_mb, "upload")

@@ -11,6 +11,7 @@ const TABS = [
   { href: "/admin/sources", label: "Sources" },
   { href: "/admin/rules", label: "Auto-approval rules" },
   { href: "/admin/index-versions", label: "Index versions" },
+  { href: "/admin/query-logs", label: "Query logs" },
   { href: "/admin/observability", label: "Observability" },
   { href: "/admin/eval", label: "Evaluation" },
   { href: "/admin/refusals", label: "Refusals" },

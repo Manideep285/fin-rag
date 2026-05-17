@@ -85,7 +85,7 @@ export default function SourcesPage() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.xlsx,.pptx,.txt,.md"
+            accept=".pdf,.docx,.xlsx,.pptx,.txt,.md,.csv"
             className="hidden"
             disabled={busy}
             onChange={(e) => {
