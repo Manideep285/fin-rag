@@ -54,6 +54,24 @@ class Settings(BaseSettings):
     eval_sample_rate: float = 0.1  # 10%
     groundedness_threshold: float = 0.6
 
+    # --- structured data / Text-to-SQL ---
+    structured_data_enabled: bool = True
+    duckdb_path: str = "data/finrag_structured.duckdb"
+    sql_max_rows: int = 500           # max rows returned from structured queries
+    sql_timeout_seconds: int = 30     # query execution timeout
+    sql_external_dsn: str = ""        # optional: external SQL Server / Postgres DSN
+
+    # --- query router ---
+    query_router_enabled: bool = True
+    query_router_confidence_threshold: float = 0.7  # min confidence to skip hybrid
+
+    # --- financial features ---
+    financial_domain: bool = True          # enable financial-specific features
+    pii_detection_enabled: bool = True     # scan answers for PII
+    mnpi_detection_enabled: bool = True    # scan for MNPI indicators
+    forward_looking_disclaimer: bool = True  # add disclaimers automatically
+    numerical_validation_enabled: bool = True  # verify numbers against context
+
 
 @lru_cache
 def get_settings() -> Settings:
